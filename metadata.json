@@ -1,0 +1,6 @@
+{
+  "name": "NothingVault",
+  "description": "Private, Telegram-powered personal backup and synchronization utility with AES-256-GCM encryption and Nothing-inspired monochrome UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

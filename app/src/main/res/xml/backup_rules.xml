@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="nothing_vault_secure_prefs.xml" />
+    <exclude domain="database" path="nothing_vault.db" />
+</full-backup-content>

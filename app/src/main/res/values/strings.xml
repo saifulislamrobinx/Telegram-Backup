@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">NothingVault</string>
+    <string name="tagline_monochrome">PRIVATE TELEGRAM BACKUP ENGINE // OS 3.0</string>
+    <string name="onboarding_title_1">PRIVATE TELEMETRY VAULT</string>
+    <string name="onboarding_desc_1">Connect your own Telegram Bot API token to synchronize photos, videos, documents, audio, contacts, and calendar exports directly to authorized Telegram chats.</string>
+    <string name="onboarding_title_2">ZERO-TRUST AES-256-GCM</string>
+    <string name="onboarding_desc_2">Telegram Bot chats are not end-to-end encrypted by default. Enable local AES-256-GCM authenticated encryption with unique 96-bit nonces before any byte leaves your device.</string>
+    <string name="onboarding_title_3">SCOPED ANDROID PRIVACY</string>
+    <string name="onboarding_desc_3">Uses zero-permission Photo Picker and Storage Access Framework. Contacts and Calendar require explicit opt-in consent. Bot tokens are hardware-backed via Android Keystore.</string>
+    <string name="nav_dashboard">VAULT</string>
+    <string name="nav_categories">SOURCES</string>
+    <string name="nav_destinations">TARGETS</string>
+    <string name="nav_transfers">QUEUE</string>
+    <string name="nav_restore">RESTORE</string>
+    <string name="nav_settings">SYSTEM</string>
+    <string name="notification_channel_name">NothingVault Transfers</string>
+    <string name="notification_channel_desc">Displays real-time Telegram backup and restoration progress</string>
+</resources>
