@@ -39,6 +39,11 @@
         </activity>
 
         <service
+            android:name=".data.NothingVaultTransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />

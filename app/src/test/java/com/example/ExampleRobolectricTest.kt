@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.database.BackupCategory
 import com.example.core.database.NothingVaultDatabase
@@ -260,6 +261,14 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
 
         // Verify Dashboard renders
+        composeTestRule.onNodeWithTag("dashboard_screen").assertIsDisplayed()
+
+        // Navigate to Backup Configuration screen from Dashboard and return
+        composeTestRule.onNodeWithTag("quick_backup_config_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("backup_configuration_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("backup_config_back_button").performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("dashboard_screen").assertIsDisplayed()
 
         // Navigate to SOURCES (Backup Categories)

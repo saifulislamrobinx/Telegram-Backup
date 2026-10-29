@@ -53,6 +53,7 @@ fun DestinationManagerScreen(
     onSetDefaultDestination: (String) -> Unit,
     onSetJobOverrideDestination: (String) -> Unit,
     onSendTestPing: (TelegramDestinationEntity) -> Unit,
+    onSendTestFile: (TelegramDestinationEntity) -> Unit = {},
     onDeleteDestination: (String) -> Unit,
     onOpenBotConnection: () -> Unit
 ) {
@@ -61,7 +62,7 @@ fun DestinationManagerScreen(
     var manualNotes by rememberSaveable { mutableStateOf("") }
     var setAsDefaultOnCreate by rememberSaveable { mutableStateOf(true) }
 
-    // User confirmation dialog before sending a test ping message to a destination
+    // User confirmation dialog before sending a test ping message or test file to a destination
     var destinationPendingTestPing by remember { mutableStateOf<TelegramDestinationEntity?>(null) }
 
     if (destinationPendingTestPing != null) {
@@ -76,19 +77,30 @@ fun DestinationManagerScreen(
             },
             text = {
                 Text(
-                    text = "Send a small verification telemetry message to '${target.title}' (${target.chatId}) using your connected bot to verify upload permissions?",
+                    text = "Verify permissions in '${target.title}' (${target.chatId}) by sending a small test message or a test probe document file using your connected bot?",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        onSendTestPing(target)
-                        destinationPendingTestPing = null
-                    },
-                    modifier = Modifier.testTag("confirm_test_ping_button")
-                ) {
-                    Text("SEND TEST MESSAGE", color = NothingRed, fontFamily = SpaceMonoFontFamily)
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(
+                        onClick = {
+                            onSendTestPing(target)
+                            destinationPendingTestPing = null
+                        },
+                        modifier = Modifier.testTag("confirm_test_ping_button")
+                    ) {
+                        Text("SEND TEST MESSAGE", color = NothingRed, fontFamily = SpaceMonoFontFamily)
+                    }
+                    TextButton(
+                        onClick = {
+                            onSendTestFile(target)
+                            destinationPendingTestPing = null
+                        },
+                        modifier = Modifier.testTag("confirm_test_file_button")
+                    ) {
+                        Text("SEND TEST DOCUMENT FILE", fontFamily = SpaceMonoFontFamily)
+                    }
                 }
             },
             dismissButton = {

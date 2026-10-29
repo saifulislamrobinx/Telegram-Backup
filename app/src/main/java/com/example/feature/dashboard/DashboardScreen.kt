@@ -64,7 +64,8 @@ fun DashboardScreen(
     onOpenDestinations: () -> Unit,
     onOpenCategories: () -> Unit,
     onOpenTransfers: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenBackupConfig: () -> Unit = {}
 ) {
     val enabledSources = selectedSources.filter { settings.enabledCategories.contains(it.category) }
     val totalSelectedCount = enabledSources.size
@@ -344,10 +345,10 @@ fun DashboardScreen(
                     testTag = "quick_destinations_button"
                 )
                 NothingOutlinedButton(
-                    text = "SETTINGS",
-                    onClick = onOpenSettings,
+                    text = "CONFIG",
+                    onClick = onOpenBackupConfig,
                     modifier = Modifier.weight(1f),
-                    testTag = "quick_settings_button"
+                    testTag = "quick_backup_config_button"
                 )
             }
         }

@@ -47,13 +47,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.domain.VaultViewModel
 import com.example.feature.backup.BackupCategoriesScreen
+import com.example.feature.backup.BackupConfigurationScreen
 import com.example.feature.dashboard.DashboardScreen
 import com.example.feature.destinations.DestinationManagerScreen
 import com.example.feature.onboarding.NothingSplashScreen
@@ -124,6 +124,7 @@ fun NothingVaultRoot(
     var onboardingCompletedInSession by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(VaultNavTab.DASHBOARD) }
     var showTelegramConnectionScreen by rememberSaveable { mutableStateOf(false) }
+    var showBackupConfigurationScreen by rememberSaveable { mutableStateOf(false) }
 
     NothingVaultTheme(darkTheme = isDarkTheme) {
         if (!splashCompleted) {
@@ -142,7 +143,7 @@ fun NothingVaultRoot(
         }
 
         // Handle system back from sub-tabs to return to DASHBOARD
-        if (!showTelegramConnectionScreen && currentTab != VaultNavTab.DASHBOARD) {
+        if (!showTelegramConnectionScreen && !showBackupConfigurationScreen && currentTab != VaultNavTab.DASHBOARD) {
             BackHandler {
                 currentTab = VaultNavTab.DASHBOARD
             }
@@ -154,12 +155,13 @@ fun NothingVaultRoot(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             val isExpandedScreen = maxWidth >= 640.dp
+            val isOverlayOpen = showTelegramConnectionScreen || showBackupConfigurationScreen
 
             Scaffold(
                 contentWindowInsets = WindowInsets.safeDrawing,
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    if (!isExpandedScreen && !showTelegramConnectionScreen) {
+                    if (!isExpandedScreen && !isOverlayOpen) {
                         NavigationBar(
                             containerColor = MaterialTheme.colorScheme.surface,
                             tonalElevation = 0.dp
@@ -199,7 +201,7 @@ fun NothingVaultRoot(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (isExpandedScreen && !showTelegramConnectionScreen) {
+                    if (isExpandedScreen && !isOverlayOpen) {
                         NavigationRail(
                             containerColor = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.fillMaxHeight()
@@ -272,136 +274,39 @@ fun NothingVaultRoot(
 
                         // Active Screen Content
                         Box(modifier = Modifier.weight(1f)) {
-                            if (showTelegramConnectionScreen) {
-                                TelegramConnectionScreen(
-                                    botState = botState,
-                                    isBusy = isBusy,
-                                    onValidateAndSaveToken = { token ->
-                                        viewModel.validateAndSaveBotToken(token)
-                                    },
-                                    onDisconnectBot = { viewModel.disconnectBot() },
-                                    onNavigateToDestinations = {
-                                        showTelegramConnectionScreen = false
-                                        currentTab = VaultNavTab.DESTINATIONS
-                                    },
-                                    onBack = { showTelegramConnectionScreen = false }
-                                )
-                            } else {
-                                when (currentTab) {
-                                    VaultNavTab.DASHBOARD -> DashboardScreen(
-                                        settings = settings,
+                            when {
+                                showTelegramConnectionScreen -> {
+                                    TelegramConnectionScreen(
                                         botState = botState,
+                                        isBusy = isBusy,
+                                        onValidateAndSaveToken = { token ->
+                                            viewModel.validateAndSaveBotToken(token)
+                                        },
+                                        onDisconnectBot = { viewModel.disconnectBot() },
+                                        onNavigateToDestinations = {
+                                            showTelegramConnectionScreen = false
+                                            currentTab = VaultNavTab.DESTINATIONS
+                                        },
+                                        onBack = { showTelegramConnectionScreen = false }
+                                    )
+                                }
+
+                                showBackupConfigurationScreen -> {
+                                    BackupConfigurationScreen(
+                                        settings = settings,
                                         destinations = destinations,
                                         selectedSources = selectedSources,
-                                        transferTasks = transferTasks,
-                                        manifests = manifests,
-                                        engineProgress = engineProgress,
-                                        onBackupNow = {
-                                            viewModel.startBackupNow()
-                                            currentTab = VaultNavTab.TRANSFERS
-                                        },
-                                        onSyncNow = {
-                                            viewModel.triggerWorkManagerSyncNow()
-                                            currentTab = VaultNavTab.TRANSFERS
-                                        },
-                                        onOpenBotConnection = { showTelegramConnectionScreen = true },
-                                        onOpenDestinations = { currentTab = VaultNavTab.DESTINATIONS },
-                                        onOpenCategories = { currentTab = VaultNavTab.CATEGORIES },
-                                        onOpenTransfers = { currentTab = VaultNavTab.TRANSFERS },
-                                        onOpenSettings = { currentTab = VaultNavTab.SETTINGS }
-                                    )
-
-                                    VaultNavTab.CATEGORIES -> BackupCategoriesScreen(
-                                        settings = settings,
-                                        selectedSources = selectedSources,
-                                        isBusy = isBusy,
-                                        onToggleCategory = { cat, enabled ->
-                                            viewModel.toggleCategory(cat, enabled)
-                                        },
-                                        onAddFiles = { uris, cat ->
-                                            viewModel.addSelectedFiles(uris, cat)
-                                        },
-                                        onAddFolder = { uri, cat ->
-                                            viewModel.addAuthorizedFolder(uri, cat)
-                                        },
-                                        onExportContacts = { viewModel.exportAndQueueContactsNow() },
-                                        onExportCalendar = { viewModel.exportAndQueueCalendarNow() },
-                                        onUpdateContactOptions = { fmt, exPh, exEm, exOrg, exNotes ->
-                                            viewModel.updateContactExportSettings(fmt, exPh, exEm, exOrg, exNotes)
-                                        },
-                                        onRemoveSource = { id -> viewModel.removeSelectedSource(id) },
-                                        onClearCategory = { cat -> viewModel.clearSourcesForCategory(cat) },
-                                        onBackupNow = {
-                                            viewModel.startBackupNow()
-                                            currentTab = VaultNavTab.TRANSFERS
-                                        },
-                                        onPostStatus = { msg -> viewModel.postStatusMessage(msg) }
-                                    )
-
-                                    VaultNavTab.DESTINATIONS -> DestinationManagerScreen(
-                                        botState = botState,
-                                        destinations = destinations,
-                                        discoveredCandidates = discoveredChats,
-                                        jobOverrideChatId = settings.jobDestinationOverrideChatId,
-                                        isBusy = isBusy,
-                                        onDiscoverFromUpdates = { viewModel.discoverAccessibleDestinations() },
-                                        onSaveManualDestination = { chatId, title, notes, makeDef ->
-                                            viewModel.verifyAndSaveDestination(chatId, title, notes, makeDef)
-                                        },
-                                        onSaveDiscoveredCandidate = { cand, makeDef ->
-                                            viewModel.saveDiscoveredCandidate(cand, makeDef)
-                                        },
-                                        onSetDefaultDestination = { chatId ->
-                                            viewModel.setDefaultDestination(chatId)
-                                        },
-                                        onSetJobOverrideDestination = { chatId ->
-                                            viewModel.setJobDestinationOverride(chatId)
-                                        },
-                                        onSendTestPing = { dest ->
-                                            viewModel.sendTestPingToDestination(dest)
-                                        },
-                                        onDeleteDestination = { chatId ->
-                                            viewModel.deleteDestination(chatId)
-                                        },
-                                        onOpenBotConnection = { showTelegramConnectionScreen = true }
-                                    )
-
-                                    VaultNavTab.TRANSFERS -> TransfersAndHistoryScreen(
-                                        tasks = transferTasks,
-                                        engineProgress = engineProgress,
-                                        recentLogs = recentLogs,
-                                        onStartBackupNow = { viewModel.startBackupNow() },
-                                        onPauseAll = { viewModel.pauseTransfers() },
-                                        onCancelAll = { viewModel.cancelAllTransfers() },
-                                        onCancelTask = { taskId -> viewModel.cancelSingleTransfer(taskId) },
-                                        onRetryFailed = { viewModel.retryFailedTransfers() },
-                                        onClearFinished = { viewModel.clearFinishedTransferHistory() }
-                                    )
-
-                                    VaultNavTab.RESTORE -> BackupManifestRestoreScreen(
-                                        manifests = manifests,
-                                        hasSavedPassphrase = hasPassphrase,
-                                        isBusy = isBusy,
-                                        restoreProgress = restoreProgress,
-                                        lastRestoreResult = lastRestoreResult,
-                                        onRestoreManifest = { manifest, passphrase, targetUri ->
-                                            viewModel.restoreFromManifest(manifest, passphrase, targetUri)
-                                        }
-                                    )
-
-                                    VaultNavTab.SETTINGS -> SettingsAndSecurityScreen(
-                                        settings = settings,
-                                        botState = botState,
-                                        destinations = destinations,
                                         hasEncryptionPassphrase = hasPassphrase,
                                         encryptionFingerprint = keyFingerprint,
-                                        onOpenBotConnection = { showTelegramConnectionScreen = true },
-                                        onOpenDestinations = { currentTab = VaultNavTab.DESTINATIONS },
-                                        onSavePassphrase = { pass ->
-                                            viewModel.saveMasterEncryptionPassphrase(pass)
+                                        isBusy = isBusy,
+                                        onToggleCategory = { cat, en ->
+                                            viewModel.toggleCategory(cat, en)
                                         },
-                                        onClearPassphrase = {
-                                            viewModel.clearMasterEncryptionPassphrase()
+                                        onSelectJobDestinationOverride = { chatId ->
+                                            viewModel.setJobDestinationOverride(chatId)
+                                        },
+                                        onTestDestinationFileUpload = { dest ->
+                                            viewModel.sendTestFileToDestination(dest)
                                         },
                                         onUpdateEncryptionConfig = { en, encMan, split ->
                                             viewModel.updateEncryptionConfig(en, encMan, split)
@@ -409,12 +314,163 @@ fun NothingVaultRoot(
                                         onUpdateSyncSchedule = { auto, hrs, wifi, chg, conc, dedup ->
                                             viewModel.updateSyncSchedule(auto, hrs, wifi, chg, conc, dedup)
                                         },
-                                        onSetThemeMode = { mode -> viewModel.setThemeMode(mode) },
-                                        onExportConfigToUri = { uri ->
-                                            viewModel.exportConfigurationToUri(uri)
+                                        onLaunchBackupNow = { explicitDest, forceDup ->
+                                            showBackupConfigurationScreen = false
+                                            viewModel.startBackupNow(explicitDest, forceDup)
+                                            currentTab = VaultNavTab.TRANSFERS
                                         },
-                                        onClearAllHistory = { viewModel.clearAllLocalHistory() }
+                                        onOpenSecuritySettings = {
+                                            showBackupConfigurationScreen = false
+                                            currentTab = VaultNavTab.SETTINGS
+                                        },
+                                        onOpenDestinations = {
+                                            showBackupConfigurationScreen = false
+                                            currentTab = VaultNavTab.DESTINATIONS
+                                        },
+                                        onBack = { showBackupConfigurationScreen = false }
                                     )
+                                }
+
+                                else -> {
+                                    when (currentTab) {
+                                        VaultNavTab.DASHBOARD -> DashboardScreen(
+                                            settings = settings,
+                                            botState = botState,
+                                            destinations = destinations,
+                                            selectedSources = selectedSources,
+                                            transferTasks = transferTasks,
+                                            manifests = manifests,
+                                            engineProgress = engineProgress,
+                                            onBackupNow = {
+                                                viewModel.startBackupNow()
+                                                currentTab = VaultNavTab.TRANSFERS
+                                            },
+                                            onSyncNow = {
+                                                viewModel.triggerWorkManagerSyncNow()
+                                                currentTab = VaultNavTab.TRANSFERS
+                                            },
+                                            onOpenBotConnection = { showTelegramConnectionScreen = true },
+                                            onOpenDestinations = { currentTab = VaultNavTab.DESTINATIONS },
+                                            onOpenCategories = { currentTab = VaultNavTab.CATEGORIES },
+                                            onOpenTransfers = { currentTab = VaultNavTab.TRANSFERS },
+                                            onOpenSettings = { currentTab = VaultNavTab.SETTINGS },
+                                            onOpenBackupConfig = { showBackupConfigurationScreen = true }
+                                        )
+
+                                        VaultNavTab.CATEGORIES -> BackupCategoriesScreen(
+                                            settings = settings,
+                                            selectedSources = selectedSources,
+                                            isBusy = isBusy,
+                                            onToggleCategory = { cat, enabled ->
+                                                viewModel.toggleCategory(cat, enabled)
+                                            },
+                                            onAddFiles = { uris, cat ->
+                                                viewModel.addSelectedFiles(uris, cat)
+                                            },
+                                            onAddFolder = { uri, cat ->
+                                                viewModel.addAuthorizedFolder(uri, cat)
+                                            },
+                                            onExportContacts = { viewModel.exportAndQueueContactsNow() },
+                                            onExportCalendar = { viewModel.exportAndQueueCalendarNow() },
+                                            onUpdateContactOptions = { fmt, exPh, exEm, exOrg, exNotes ->
+                                                viewModel.updateContactExportSettings(fmt, exPh, exEm, exOrg, exNotes)
+                                            },
+                                            onRemoveSource = { id -> viewModel.removeSelectedSource(id) },
+                                            onClearCategory = { cat -> viewModel.clearSourcesForCategory(cat) },
+                                            onBackupNow = {
+                                                viewModel.startBackupNow()
+                                                currentTab = VaultNavTab.TRANSFERS
+                                            },
+                                            onPostStatus = { msg -> viewModel.postStatusMessage(msg) }
+                                        )
+
+                                        VaultNavTab.DESTINATIONS -> DestinationManagerScreen(
+                                            botState = botState,
+                                            destinations = destinations,
+                                            discoveredCandidates = discoveredChats,
+                                            jobOverrideChatId = settings.jobDestinationOverrideChatId,
+                                            isBusy = isBusy,
+                                            onDiscoverFromUpdates = { viewModel.discoverAccessibleDestinations() },
+                                            onSaveManualDestination = { chatId, title, notes, makeDef ->
+                                                viewModel.verifyAndSaveDestination(chatId, title, notes, makeDef)
+                                            },
+                                            onSaveDiscoveredCandidate = { cand, makeDef ->
+                                                viewModel.saveDiscoveredCandidate(cand, makeDef)
+                                            },
+                                            onSetDefaultDestination = { chatId ->
+                                                viewModel.setDefaultDestination(chatId)
+                                            },
+                                            onSetJobOverrideDestination = { chatId ->
+                                                viewModel.setJobDestinationOverride(chatId)
+                                            },
+                                            onSendTestPing = { dest ->
+                                                viewModel.sendTestPingToDestination(dest)
+                                            },
+                                            onSendTestFile = { dest ->
+                                                viewModel.sendTestFileToDestination(dest)
+                                            },
+                                            onDeleteDestination = { chatId ->
+                                                viewModel.deleteDestination(chatId)
+                                            },
+                                            onOpenBotConnection = { showTelegramConnectionScreen = true }
+                                        )
+
+                                        VaultNavTab.TRANSFERS -> TransfersAndHistoryScreen(
+                                            tasks = transferTasks,
+                                            engineProgress = engineProgress,
+                                            recentLogs = recentLogs,
+                                            onStartBackupNow = { viewModel.startBackupNow() },
+                                            onPauseAll = { viewModel.pauseTransfers() },
+                                            onCancelAll = { viewModel.cancelAllTransfers() },
+                                            onCancelTask = { taskId -> viewModel.cancelSingleTransfer(taskId) },
+                                            onRetryFailed = { viewModel.retryFailedTransfers() },
+                                            onClearFinished = { viewModel.clearFinishedTransferHistory() }
+                                        )
+
+                                        VaultNavTab.RESTORE -> BackupManifestRestoreScreen(
+                                            manifests = manifests,
+                                            hasSavedPassphrase = hasPassphrase,
+                                            isBusy = isBusy,
+                                            restoreProgress = restoreProgress,
+                                            lastRestoreResult = lastRestoreResult,
+                                            onRestoreManifest = { manifest, passphrase, targetUri ->
+                                                viewModel.restoreFromManifest(manifest, passphrase, targetUri)
+                                            },
+                                            onBatchRestoreManifests = { items, passphrase ->
+                                                viewModel.batchRestoreManifests(items, passphrase)
+                                            },
+                                            onImportManifestUri = { uri, passphrase ->
+                                                viewModel.importManifestFromUri(uri, passphrase)
+                                            }
+                                        )
+
+                                        VaultNavTab.SETTINGS -> SettingsAndSecurityScreen(
+                                            settings = settings,
+                                            botState = botState,
+                                            destinations = destinations,
+                                            hasEncryptionPassphrase = hasPassphrase,
+                                            encryptionFingerprint = keyFingerprint,
+                                            onOpenBotConnection = { showTelegramConnectionScreen = true },
+                                            onOpenDestinations = { currentTab = VaultNavTab.DESTINATIONS },
+                                            onSavePassphrase = { pass ->
+                                                viewModel.saveMasterEncryptionPassphrase(pass)
+                                            },
+                                            onClearPassphrase = {
+                                                viewModel.clearMasterEncryptionPassphrase()
+                                            },
+                                            onUpdateEncryptionConfig = { en, encMan, split ->
+                                                viewModel.updateEncryptionConfig(en, encMan, split)
+                                            },
+                                            onUpdateSyncSchedule = { auto, hrs, wifi, chg, conc, dedup ->
+                                                viewModel.updateSyncSchedule(auto, hrs, wifi, chg, conc, dedup)
+                                            },
+                                            onSetThemeMode = { mode -> viewModel.setThemeMode(mode) },
+                                            onExportConfigToUri = { uri ->
+                                                viewModel.exportConfigurationToUri(uri)
+                                            },
+                                            onClearAllHistory = { viewModel.clearAllLocalHistory() }
+                                        )
+                                    }
                                 }
                             }
                         }

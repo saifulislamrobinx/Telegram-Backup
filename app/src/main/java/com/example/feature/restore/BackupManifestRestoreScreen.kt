@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -51,13 +53,16 @@ fun BackupManifestRestoreScreen(
     isBusy: Boolean,
     restoreProgress: Float?,
     lastRestoreResult: RestoreResult?,
-    onRestoreManifest: (manifest: BackupManifestEntity, passphrase: String, targetUri: Uri?) -> Unit
+    onRestoreManifest: (manifest: BackupManifestEntity, passphrase: String, targetUri: Uri?) -> Unit,
+    onBatchRestoreManifests: (List<BackupManifestEntity>, String) -> Unit = { _, _ -> },
+    onImportManifestUri: (Uri, String) -> Unit = { _, _ -> }
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedManifestForRestore by remember { mutableStateOf<BackupManifestEntity?>(null) }
     var passphraseInput by rememberSaveable { mutableStateOf("") }
+    val selectedIdsForBatch = remember { mutableStateListOf<Long>() }
 
-    // SAF CreateDocument launcher so user can pick custom output location on restore
+    // SAF CreateDocument launcher so user can pick custom output location on single-file restore
     val createDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*")
     ) { targetUri ->
@@ -65,6 +70,15 @@ fun BackupManifestRestoreScreen(
         if (m != null && targetUri != null) {
             onRestoreManifest(m, passphraseInput, targetUri)
             selectedManifestForRestore = null
+        }
+    }
+
+    // SAF OpenDocument launcher to import an external .json or encrypted .json.nvenc manifest
+    val importManifestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            onImportManifestUri(uri, passphraseInput)
         }
     }
 
@@ -196,6 +210,7 @@ fun BackupManifestRestoreScreen(
             }
         }
 
+        // Search, Import Manifest, and Batch Selection Controls
         NothingCard(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 value = searchQuery,
@@ -207,8 +222,53 @@ fun BackupManifestRestoreScreen(
                     .testTag("manifest_search_input")
             )
             Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                NothingOutlinedButton(
+                    text = "IMPORT MANIFEST (.JSON/.NVENC)",
+                    onClick = { importManifestLauncher.launch(arrayOf("*/*")) },
+                    enabled = !isBusy,
+                    modifier = Modifier.weight(1f),
+                    testTag = "import_manifest_button"
+                )
+                if (filtered.isNotEmpty()) {
+                    NothingOutlinedButton(
+                        text = if (selectedIdsForBatch.size == filtered.size) "CLEAR SELECT" else "SELECT ALL",
+                        onClick = {
+                            if (selectedIdsForBatch.size == filtered.size) {
+                                selectedIdsForBatch.clear()
+                            } else {
+                                selectedIdsForBatch.clear()
+                                selectedIdsForBatch.addAll(filtered.map { it.manifestId })
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            if (selectedIdsForBatch.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val selectedManifests = manifests.filter { selectedIdsForBatch.contains(it.manifestId) }
+                NothingPrimaryButton(
+                    text = "BATCH RESTORE SELECTED (${selectedManifests.size})",
+                    onClick = {
+                        onBatchRestoreManifests(selectedManifests, passphraseInput)
+                        selectedIdsForBatch.clear()
+                    },
+                    enabled = !isBusy,
+                    accentRed = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "batch_restore_button"
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "NOTE: Restoration downloads files directly via Telegram Bot API getFile using the recorded file_id. Deleted Telegram messages or files > 20 MB (Bot API download ceiling) cannot be fetched via standard Bot API.",
+                text = "NOTE: Restoration downloads files directly via Telegram Bot API getFile using the recorded file_id. Deleted Telegram messages cannot be recovered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -222,13 +282,14 @@ fun BackupManifestRestoreScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Every file uploaded to Telegram by NothingVault is indexed here with its SHA-256 content hash, encryption metadata, and Telegram file_id for verified restoration.",
+                    text = "Every file uploaded to Telegram by NothingVault is indexed here with its SHA-256 content hash, encryption metadata, and Telegram file_id for verified restoration. You can also import a saved manifest file above.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
             filtered.forEach { item ->
+                val isChecked = selectedIdsForBatch.contains(item.manifestId)
                 NothingCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -239,17 +300,32 @@ fun BackupManifestRestoreScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.originalFileName,
-                                style = MaterialTheme.typography.titleMedium
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Checkbox(
+                                checked = isChecked,
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        selectedIdsForBatch.add(item.manifestId)
+                                    } else {
+                                        selectedIdsForBatch.remove(item.manifestId)
+                                    }
+                                }
                             )
-                            Text(
-                                text = "${item.backupId} • ${item.category} • ${FormatUtils.formatBytes(item.fileSize)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontFamily = SpaceMonoFontFamily
-                            )
+                            Column {
+                                Text(
+                                    text = item.originalFileName,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "${item.backupId} • ${item.category} • ${FormatUtils.formatBytes(item.fileSize)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontFamily = SpaceMonoFontFamily
+                                )
+                            }
                         }
                         NothingStatusPill(
                             label = if (item.isEncrypted) "AES-256-GCM" else "PLAINTEXT",

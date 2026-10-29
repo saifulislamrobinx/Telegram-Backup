@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.core.common.FormatUtils
 import com.example.core.common.RedactedLogEntry
 import com.example.core.common.VaultLogger
 import com.example.core.database.BackupCategory
@@ -17,15 +18,20 @@ import com.example.core.network.DiscoveredChatCandidate
 import com.example.core.security.BotConnectionState
 import com.example.core.security.VaultCryptoEngine
 import com.example.data.EngineProgressSnapshot
+import com.example.data.NothingVaultTransferService
 import com.example.data.RestoreResult
 import com.example.data.SyncScheduler
 import com.example.data.VaultSettingsState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
 
 class VaultViewModel(
     private val appContext: Context,
@@ -134,7 +140,6 @@ class VaultViewModel(
                         canJoinGroups = botUser.canJoinGroups
                     )
                     postStatusMessage("CONNECTED: ${botUser.firstName} (@${botUser.username})")
-                    // Automatically attempt chat discovery once connected
                     discoverAccessibleDestinations()
                     onSuccess()
                 },
@@ -221,7 +226,6 @@ class VaultViewModel(
                         postStatusMessage("VERIFIED DESTINATION: ${entity.title} (${entity.chatId})")
                     },
                     onFailure = { err ->
-                        // Allow saving unverified manual destination if user is configuring offline or before adding bot
                         val entity = TelegramDestinationEntity(
                             chatId = target,
                             title = customTitle.ifBlank { "Manual Target ($target)" },
@@ -325,10 +329,62 @@ class VaultViewModel(
                             lastTestedAt = System.currentTimeMillis()
                         )
                     )
-                    postStatusMessage("TEST PASSED: Sent verification message #$msgId to ${destination.title}.")
+                    postStatusMessage("TEST MESSAGE PASSED: Sent msg #$msgId to ${destination.title}.")
                 },
                 onFailure = { err ->
-                    postStatusMessage("TEST FAILED for ${destination.title}: ${err.message}")
+                    postStatusMessage("TEST MESSAGE FAILED for ${destination.title}: ${err.message}")
+                }
+            )
+        }
+    }
+
+    /**
+     * Sends a small verification document file (`nothingvault_test_probe.txt`) to verify
+     * that the bot specifically has `sendDocument` / file-upload permissions in the target chat.
+     */
+    fun sendTestFileToDestination(destination: TelegramDestinationEntity) {
+        val token = credentials.getBotToken()
+        if (token.isNullOrBlank()) {
+            postStatusMessage("Connect your Telegram Bot token first.")
+            return
+        }
+        viewModelScope.launch {
+            _isBusy.value = true
+            val result = withContext(Dispatchers.IO) {
+                val probeFile = File(appContext.cacheDir, "nothingvault_test_probe.txt")
+                val nowStr = VaultLogger.formatTimestamp(System.currentTimeMillis())
+                val probeContent = "NOTHING // VAULT FILE UPLOAD PROBE\n" +
+                    "Destination: ${destination.title} (${destination.chatId})\n" +
+                    "Verified At: $nowStr\n" +
+                    "Status: DOCUMENT UPLOAD PERMISSION OK\n"
+                probeFile.writeText(probeContent, Charsets.UTF_8)
+                val sha256 = FormatUtils.computeSha256Bytes(probeContent.toByteArray(Charsets.UTF_8))
+
+                val uploadRes = telegram.uploadDocument(
+                    rawToken = token,
+                    chatId = destination.chatId,
+                    file = probeFile,
+                    uploadFileName = "nothingvault_test_probe.txt",
+                    mimeType = "text/plain",
+                    caption = "[NothingVault Probe] File upload permission verified // SHA256:${sha256.take(12)}"
+                )
+                probeFile.delete()
+                uploadRes
+            }
+            _isBusy.value = false
+            result.fold(
+                onSuccess = { upload ->
+                    dao.upsertDestination(
+                        destination.copy(
+                            isVerified = true,
+                            canSendDocuments = true,
+                            lastTestedAt = System.currentTimeMillis()
+                        )
+                    )
+                    postStatusMessage("TEST FILE UPLOAD PASSED: msg #${upload.messageId} in ${destination.title}.")
+                },
+                onFailure = { err ->
+                    postStatusMessage("TEST FILE UPLOAD FAILED for ${destination.title}: ${err.message}")
                 }
             )
         }
@@ -483,6 +539,21 @@ class VaultViewModel(
         }
     }
 
+    fun verifyMasterPassphrase(candidate: String) {
+        val stored = credentials.getEncryptionPassphrase()
+        if (stored.isBlank()) {
+            postStatusMessage("No master passphrase is currently stored.")
+            return
+        }
+        val matches = stored == candidate.trim()
+        val fp = VaultCryptoEngine.computeKeyFingerprint(candidate.trim())
+        if (matches) {
+            postStatusMessage("KEY VERIFIED: Passphrase matches stored key ($fp).")
+        } else {
+            postStatusMessage("KEY MISMATCH: Candidate fingerprint ($fp) does not match active key (${_encryptionFingerprint.value}).")
+        }
+    }
+
     fun clearMasterEncryptionPassphrase() {
         viewModelScope.launch {
             credentials.clearEncryptionPassphrase()
@@ -548,20 +619,30 @@ class VaultViewModel(
     }
 
     fun startBackupNow(explicitDestinationChatId: String? = null, forceDuplicates: Boolean = false) {
-        transferEngine.triggerBackupNow(
+        // Attempt foreground service first; fallback to direct engine execution if service promotion is restricted
+        val startedService = NothingVaultTransferService.startUserInitiatedBackup(
+            context = appContext,
             explicitDestinationChatId = explicitDestinationChatId,
-            forceUploadDuplicates = forceDuplicates,
-            onResult = { res ->
-                res.fold(
-                    onSuccess = { uploadedCount ->
-                        postStatusMessage("Backup cycle completed ($uploadedCount file(s) uploaded to Telegram).")
-                    },
-                    onFailure = { err ->
-                        postStatusMessage("Backup error: ${err.message}")
-                    }
-                )
-            }
+            forceDuplicates = forceDuplicates
         )
+        if (!startedService) {
+            transferEngine.triggerBackupNow(
+                explicitDestinationChatId = explicitDestinationChatId,
+                forceUploadDuplicates = forceDuplicates,
+                onResult = { res ->
+                    res.fold(
+                        onSuccess = { uploadedCount ->
+                            postStatusMessage("Backup cycle completed ($uploadedCount file(s) uploaded to Telegram).")
+                        },
+                        onFailure = { err ->
+                            postStatusMessage("Backup error: ${err.message}")
+                        }
+                    )
+                }
+            )
+        } else {
+            postStatusMessage("Started foreground backup transfer job.")
+        }
     }
 
     fun triggerWorkManagerSyncNow() {
@@ -612,7 +693,7 @@ class VaultViewModel(
         }
     }
 
-    // --- Backup Manifest Restoration ---
+    // --- Backup Manifest Restoration (Single, Batch & External Import) ---
     fun restoreFromManifest(
         manifest: BackupManifestEntity,
         passphraseInput: String = "",
@@ -640,6 +721,104 @@ class VaultViewModel(
                 },
                 onFailure = { err ->
                     postStatusMessage("RESTORE FAILED: ${err.message}")
+                }
+            )
+        }
+    }
+
+    fun batchRestoreManifests(
+        items: List<BackupManifestEntity>,
+        passphraseInput: String = ""
+    ) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            _isBusy.value = true
+            var successCount = 0
+            var failCount = 0
+            items.forEachIndexed { index, item ->
+                _restoreProgress.value = (index.toFloat() / items.size.coerceAtLeast(1))
+                val res = transferEngine.restoreFromManifest(
+                    manifest = item,
+                    passphraseOverride = passphraseInput,
+                    targetDocumentUri = null
+                )
+                res.fold(
+                    onSuccess = { info ->
+                        successCount++
+                        _lastRestoreResult.value = info
+                    },
+                    onFailure = {
+                        failCount++
+                    }
+                )
+            }
+            _isBusy.value = false
+            _restoreProgress.value = null
+            postStatusMessage("BATCH RESTORE COMPLETE: $successCount verified, $failCount failed.")
+        }
+    }
+
+    /**
+     * Imports a JSON or AES-256-GCM encrypted (.nvenc) backup manifest file from SAF storage,
+     * allowing users to recover their backup index on a new device.
+     */
+    fun importManifestFromUri(uri: Uri, passphraseInput: String = "") {
+        viewModelScope.launch {
+            _isBusy.value = true
+            val importRes = withContext(Dispatchers.IO) {
+                runCatching {
+                    val rawBytes = appContext.contentResolver.openInputStream(uri)?.use {
+                        it.readBytes()
+                    } ?: error("Cannot read selected manifest file")
+
+                    val magic = "NVLT1".toByteArray(Charsets.US_ASCII)
+                    val isEncryptedPayload = rawBytes.size > magic.size &&
+                        rawBytes.copyOfRange(0, magic.size).contentEquals(magic)
+
+                    val jsonText = if (isEncryptedPayload) {
+                        val key = passphraseInput.trim().ifBlank { credentials.getEncryptionPassphrase() }
+                        require(key.isNotBlank()) {
+                            "Selected manifest is encrypted with AES-256-GCM. Enter your master passphrase to decrypt it."
+                        }
+                        String(VaultCryptoEngine.decryptBytes(rawBytes, key), Charsets.UTF_8)
+                    } else {
+                        String(rawBytes, Charsets.UTF_8)
+                    }
+
+                    val root = JSONObject(jsonText)
+                    val itemsArr = root.getJSONArray("items")
+                    var importedCount = 0
+                    for (i in 0 until itemsArr.length()) {
+                        val obj = itemsArr.getJSONObject(i)
+                        val entity = BackupManifestEntity(
+                            backupId = obj.optString("backupId", "IMPORTED"),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            destinationChatId = obj.optString("destinationChatId", ""),
+                            destinationTitle = obj.optString("destinationTitle", "Imported Target"),
+                            originalFileName = obj.optString("originalFileName", "file_$i"),
+                            uploadedFileName = obj.optString("uploadedFileName", "file_$i"),
+                            fileSize = obj.optLong("fileSize", 0L),
+                            mimeType = obj.optString("mimeType", "application/octet-stream"),
+                            contentSha256 = obj.optString("contentSha256", ""),
+                            isEncrypted = obj.optBoolean("isEncrypted", false),
+                            telegramMessageId = obj.optLong("telegramMessageId", 0L),
+                            telegramFileId = obj.optString("telegramFileId", ""),
+                            category = obj.optString("category", BackupCategory.DOCUMENTS.name),
+                            uploadStatus = obj.optString("uploadStatus", "COMPLETED")
+                        )
+                        dao.insertManifest(entity)
+                        importedCount++
+                    }
+                    importedCount
+                }
+            }
+            _isBusy.value = false
+            importRes.fold(
+                onSuccess = { count ->
+                    postStatusMessage("IMPORTED MANIFEST: Restored $count backup index record(s).")
+                },
+                onFailure = { err ->
+                    postStatusMessage("MANIFEST IMPORT FAILED: ${err.message}")
                 }
             )
         }
